@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DeathPath</title>
+
+    <script type="text/javascript">
+        window.cw = window.cw || {};
+        window.cw.svg = window.cw.svg || {};
+        cw.svgns = "http://www.w3.org/2000/svg";
+        cw.svglinkns = "http://www.w3.org/1999/xlink";
+
+        (function () { // Cargowire
+            var subs = {};
+            this.sub = function (key, callback) {
+                var callbacks = subs[key] = subs[key] || [];
+                callbacks.push(callback);
+            };
+            this.pub = function (key, event) {
+                event = event || {};
+                var callbacks = subs[key];
+                if (callbacks) {
+                    for (var i = callbacks.length - 1; i >= 0; i--) {
+                        callbacks[i](event);
+                    }
+                };
+            };
+            this.colors = new function () {
+                this.red = "#F00";
+                this.blue = "#00F";
+            }();
+        }).apply(cw);
+
+        (function () { // Cargowire.Svg
+            this.getSvgRoot = function (element) {       
+                var root, ancestor = element;
+                while (ancestor != null) {
+                    root = ancestor;
+                    ancestor = ancestor.ownerSVGElement;
+                }
+                return root;
+            };
+
+            this.createSVG = function(eType, attribs, parent) {
+                var item = document.createElementNS(cw.svgns, eType);
+                for (var key in attribs) {
+                    if (attribs.hasOwnProperty(key))
+                        item.setAttributeNS(null, key, attribs[key]);
+                }
+
+                if (parent) parent.appendChild(item);
+
+                return item;
+            };
+
+           this.path = function (points /* { t: p: [] } */) {
+               this.points = points;
+
+               var dataString = "";
+               for(var i=0; i < points.length; i++)
+               {
+                   dataString += "" + points[i].t;
+                   for(var j=0; j < points[i].p.length; j++)
+                   {
+                       dataString += points[i].p[j].x + " " + points[i].p[j].y + " ";
+                   }
+               }
+               var element = cw.svg.createSVG("path", { "d": dataString, "stroke-width": 2, "stroke": "rgb(188,153,131)" });
+
+               this.getSvg = function()
+               {
+                   return element;
+               }
+           };
+
+           this.path.prototype.join = function (path) {
+               var newPathPoints = this.points;
+               for (var i = 0; i < path.points.length; i++)
+               {
+                   if(i==0 && path.points[i].t == "M")
+                       newPathPoints.push({ t: "L", p: path.points[i].p });
+                   else
+                       newPathPoints.push(path.points[i]);
+               }
+               return new cw.svg.path(newPathPoints);
+           };
+
+        }).apply(cw.svg);
+    </script>
+
+    <script type="text/javascript">       
+        /*
+         --t1--t2--
+        |          |
+     l1_|          |_r1
+        |          |
+     l2_|          |_r2
+        |          |
+        |__b1__b2__|
+        */
+        window.deathPath = window.deathPath || {};
+        deathPath.pos = { l1: 0, l2: 1, b1: 2, b2: 3, r2: 4, r1: 5, t2: 6, t1: 7 };
+
+        deathPath.placeholder = function (gameContainer, x, y)
+        {
+            var svgElement = undefined;
+            this.getSvg = function () {
+                if (svgElement == undefined)
+                    svgElement = createSvgElement(gameContainer);
+
+                return svgElement;
+            }
+
+            var createSvgElement = function (container) {
+                svgElement = cw.svg.createSVG("g", { transform: "translate(" + x + "," + y + ")" }, container);
+                cw.svg.createSVG("rect", { "class": "placeholder", "x": 0, "y": 0, "width": 102, "height": 102, "fill": "rgb(238,117,4)", "stroke": "rgb(217,95,9)" }, svgElement);
+
+                var l1line = cw.svg.createSVG("line", { "x1": 34, "y1": -5, "x2": 34, "y2": 5, "stroke": "rgb(249,209,87)" }, svgElement);
+                var l2line = cw.svg.createSVG("line", { "x1": 68, "y1": -5, "x2": 68, "y2": 5, "stroke": "rgb(249,209,87)" }, svgElement);
+                var b1line = cw.svg.createSVG("line", { "x1": -5, "y1": 34, "x2": 5, "y2": 34, "stroke": "rgb(249,209,87)" }, svgElement);
+                var b2line = cw.svg.createSVG("line", { "x1": -5, "y1": 68, "x2": 5, "y2": 68, "stroke": "rgb(249,209,87)" }, svgElement);
+                var r1line = cw.svg.createSVG("line", { "x1": 34, "y1": 97, "x2": 34, "y2": 107, "stroke": "rgb(249,209,87)" }, svgElement);
+                var r2line = cw.svg.createSVG("line", { "x1": 68, "y1": 97, "x2": 68, "y2": 107, "stroke": "rgb(249,209,87)" }, svgElement);
+                var t1line = cw.svg.createSVG("line", { "x1": 97, "y1": 34, "x2": 107, "y2": 34, "stroke": "rgb(249,209,87)" }, svgElement);
+                var t2line = cw.svg.createSVG("line", { "x1": 97, "y1": 68, "x2": 107, "y2": 68, "stroke": "rgb(249,209,87)" }, svgElement);
+
+                return svgElement;
+            };
+        }
+        deathPath.placeholder.prototype.contains = function(point)
+        {
+            return point.x >= (this.getSvg().getCTM().e) && point.x < (this.getSvg().getCTM().e + 100)
+                && point.y >= (this.getSvg().getCTM().f) && point.y < (this.getSvg().getCTM().f + 100);
+        }
+
+        deathPath.board = function(gameContainer, x, y)
+        {
+            var that = this;
+
+            var svgElement = undefined;
+            this.getSvg = function () {
+                if (that.svgElement == undefined) {
+                    that.svgElement = createSvgElement(gameContainer);
+                }
+
+                return svgElement;
+            }
+
+            var createSvgElement = function(container) {
+                return cw.svg.createSVG("rect", { "x": 0, "y": 0, "width": 622, "height": 622, "fill": "black" }, container);
+            }
+
+            this.getSvg();
+
+            this.placeholders = new Array(x);
+            for (var xi = 0; xi < x; xi++)
+            {
+                this.placeholders[xi] = [];
+                for (var yi = 0; yi < y; yi++)
+                {
+                    this.placeholders[xi].push(new deathPath.placeholder(gameContainer, (xi*102)+5, (yi*102)+5));
+                }
+            }
+
+            for (var xi = 0; xi < this.placeholders.length; xi++)
+            {
+                for (var yi = 0; yi < this.placeholders[xi].length; yi++)
+                {
+                    this.placeholders[xi][yi].getSvg();
+                }
+            }
+
+            cw.sub('tile.dropped', function (tile) { that.snap(tile); });
+        }
+
+        deathPath.board.prototype.snap = function(tile)
+        {
+            var tileMidPoint = tile.getMidpoint();
+            for (var x = 0; x < this.placeholders.length; x++)
+            {
+                for (var y = 0; y < this.placeholders[x].length; y++)
+                {
+                    if (this.placeholders[x][y].contains(tileMidPoint)) {
+                        tile.getSvg().setAttributeNS(null, "transform", "translate(" + this.placeholders[x][y].getSvg().getCTM().e + "," + this.placeholders[x][y].getSvg().getCTM().f + ")");
+                        cw.pub('placeholder.filled', this.placeholders[x][y]);
+                    }
+                }
+            }
+        }
+
+        deathPath.tile = function (gameContainer, routes, x, y) {
+            var that = this;
+
+            this.isSelected = false;
+            this.currentRotation = 0;
+            this.currentX = 0;
+            this.currentY = 0;
+            this.paths = [];
+
+            var svgElement = undefined;
+            this.getSvg = function () {
+                if (svgElement == undefined) {
+                    svgElement = createSvgElement(gameContainer);
+                }
+
+                return svgElement;
+            }
+
+            var createSvgElement = function (container) {
+                svgElement = cw.svg.createSVG("g", { transform: "translate(" + x + "," + y + ")" }, container);
+                var nestedTile = cw.svg.createSVG("g", {}, svgElement);
+                cw.svg.createSVG("rect", { "x": 0, "y": 0, "width": 100, "height": 100, "fill": "rgb(148,89,55)", "stroke-width": 0, "stroke": "rgb(148,89,55)" }, nestedTile);
+
+                for (var i = 0; i < routes.length; i++)
+                {
+                    var first = that.coordForPosition(routes[i][0]);
+                    var second = that.coordForPosition(routes[i][1]);
+                    var path = new cw.svg.path([{ t: "M", p: [{ x: first[0], y: first[1] }] }, { t: "L", p: [{ x: second[0], y: second[1] }] }]);
+                    that.paths.push(path);
+                    nestedTile.appendChild(path.getSvg());
+                }
+                return svgElement;
+            }
+
+            this.getSvg().addEventListener("mousedown", function(e) { that.mousedown(e) });
+            cw.sub('key.up', function (e) { that.keyup(e); });
+            cw.sub('mouse.up', function (e) { that.mouseup(e); });
+            cw.sub('mouse.move', function (e) { that.mousemove(e); });
+        };
+
+        deathPath.tile.prototype.contains = function (point) {
+            return point.x >= (this.getSvg().getCTM().e) && point.x < (this.getSvg().getCTM().e + 100)
+                && point.y >= (this.getSvg().getCTM().f) && point.y < (this.getSvg().getCTM().f + 100);
+        }
+
+        deathPath.tile.prototype.containsClient = function (point) {
+            return point.x >= (this.getSvg().getScreenCTM().e) && point.x < (this.getSvg().getScreenCTM().e + 100)
+                && point.y >= (this.getSvg().getScreenCTM().f) && point.y < (this.getSvg().getScreenCTM().f + 100);
+        }
+
+        deathPath.tile.prototype.getMidpoint = function()
+        {
+            return { x: this.getSvg().getCTM().e + 50, y: this.getSvg().getCTM().f + 50 };
+        }
+
+        deathPath.tile.prototype.getInternalMidPoint = function () {
+            return { x: 50, y: 50 };
+        }
+
+        deathPath.tile.prototype.getClientPaths = function () {
+            var clientPaths = [];
+            for (var j = 0; j < this.paths.length; j++)
+            {
+                var matrix = this.paths[j].getSvg().getScreenCTM();
+                var docRoot = cw.svg.getSvgRoot(this.paths[j].getSvg());
+                var docTransform = docRoot.getScreenCTM();
+                var newPathPoints = [];
+                for (var i = 0; i < this.paths[j].points.length; i++)
+                {
+                    var pathPoints = [];
+                    for (var k = 0; k < this.paths[j].points[i].p.length; k++)
+                    {
+                        var pt = docRoot.createSVGPoint();
+                        
+                        pt.x = this.paths[j].points[i].p[k].x - docTransform.e;
+                        pt.y = this.paths[j].points[i].p[k].y - docTransform.f;
+                        var newPt = pt.matrixTransform(matrix);
+                        pathPoints.push({ x: newPt.x, y: newPt.y})
+                    }
+                 
+                    newPathPoints.push({ t: this.paths[j].points[i].t, p: pathPoints });
+                }
+                clientPaths.push(new cw.svg.path(newPathPoints));
+            }
+
+            return clientPaths;
+        }
+
+        deathPath.tile.prototype.coordForPosition = function (position)
+        {
+            switch (position)
+            {
+                case deathPath.pos.l1:
+                    return [0, 34];
+                    break;
+                case deathPath.pos.l2:
+                    return [0, 68];
+                    break;
+                case deathPath.pos.b1:
+                    return [34, 102];
+                    break;
+                case deathPath.pos.b2:
+                    return [68, 102];
+                    break;
+                case deathPath.pos.r2:
+                    return [102, 68];
+                    break;
+                case deathPath.pos.r1:
+                    return [102, 34];
+                    break;
+                case deathPath.pos.t2:
+                    return [68, 0];
+                    break;
+                case deathPath.pos.t1:
+                    return [34, 0];
+                    break;
+            }
+        };
+
+        deathPath.tile.prototype.rotateLeft = function () {
+            var midPoint = this.getInternalMidPoint();
+            this.currentRotation -= 90;
+            this.getSvg().childNodes[0].setAttributeNS(null, "transform", "rotate(" + this.currentRotation + ", " + midPoint.x + "," + midPoint.y + ")");
+        };
+
+        deathPath.tile.prototype.rotateRight = function () {
+            var midPoint = this.getInternalMidPoint();
+            this.currentRotation += 90;
+            this.getSvg().childNodes[0].setAttributeNS(null, "transform", "rotate(" + this.currentRotation + ", " + midPoint.x + "," + midPoint.y + ")");
+        };
+
+        deathPath.tile.prototype.keyup = function(e)
+        {
+            if (this.isSelected)
+            {
+                if (e.keyCode == 39) // Right
+                    this.rotateRight();
+                else if (e.keyCode == 37) // Left
+                    this.rotateLeft();
+            }
+        };
+
+        deathPath.tile.prototype.mouseup = function (e) { if (this.isSelected) { cw.pub('tile.dropped', this); } this.isSelected = false; e.preventDefault(); };
+        deathPath.tile.prototype.mousemove = function (e) {
+            if (this.isSelected) {
+                var dx = e.clientX - this.currentX;
+                var dy = e.clientY - this.currentY;
+
+                var transformList = this.getSvg().transform.baseVal;
+                var transform = transformList.getItem(0);
+                if (transform.type == SVGTransform.SVG_TRANSFORM_TRANSLATE) {
+                    var firstX = transform.matrix.e;
+                    var firstY = transform.matrix.f;
+                }
+
+                this.getSvg().transform.baseVal.getItem(0).setTranslate(firstX + dx, firstY + dy);
+
+                this.currentX = e.clientX;
+                this.currentY = e.clientY;
+                e.preventDefault();
+            }
+        };
+
+        deathPath.tile.prototype.mousedown = function (e) {
+            this.isSelected = true;
+            this.getSvg().parentNode.appendChild(this.getSvg());
+            this.currentX = e.clientX;
+            this.currentY = e.clientY;
+            e.preventDefault();
+        };
+
+        deathPath.player = function (gameContainer, colour)
+        {
+            var that = this;
+
+            this.isSelected = false;
+            this.currentX = 0;
+            this.currentY = 0;
+
+            var gameContainer = gameContainer;
+            var svgElement = undefined;
+            var createSvgElement = function (container) {
+                svgElement = cw.svg.createSVG("g", { "transform": "translate(650,20)" }, container);
+                cw.svg.createSVG("ellipse", { "cx": 15, "cy": 10, "rx": 15, "ry": 10, "fill": colour }, svgElement);
+                return svgElement;
+            }
+
+            this.getSvg = function () {
+                if (svgElement == undefined) {
+                    svgElement = createSvgElement(gameContainer);
+                }
+
+                return svgElement;
+            }
+
+            this.getSvg().addEventListener("mousedown", function (e) { that.mousedown(e) });
+            cw.sub('mouse.up', function (e) { that.mouseup(e); });
+            cw.sub('mouse.move', function (e) { that.mousemove(e); });
+        }
+
+        deathPath.player.prototype.containsClient = function (point) {
+            return point.x >= (this.getSvg().getScreenCTM().e) && point.x < (this.getSvg().getScreenCTM().e + 100)
+                && point.y >= (this.getSvg().getScreenCTM().f) && point.y < (this.getSvg().getScreenCTM().f + 100);
+        }
+
+        deathPath.player.prototype.mouseup = function (e) { if (this.isSelected) { cw.pub('player.dropped', this); } this.isSelected = false; e.preventDefault(); };
+        deathPath.player.prototype.mousemove = function (e) {
+            if (this.isSelected) {
+                var dx = e.clientX - this.currentX;
+                var dy = e.clientY - this.currentY;
+
+                var transformList = this.getSvg().transform.baseVal;
+                var transform = transformList.getItem(0);
+                if (transform.type == SVGTransform.SVG_TRANSFORM_TRANSLATE) {
+                    var firstX = transform.matrix.e;
+                    var firstY = transform.matrix.f;
+                }
+
+                this.getSvg().transform.baseVal.getItem(0).setTranslate(firstX + dx, firstY + dy);
+
+                this.currentX = e.clientX;
+                this.currentY = e.clientY;
+                e.preventDefault();
+            }
+        };
+
+        deathPath.player.prototype.mousedown = function (e) {
+            if (this.containsClient({ x: e.clientX, y: e.clientY })) {
+                
+                this.isSelected = true;
+                this.getSvg().parentNode.appendChild(this.getSvg());
+                this.currentX = e.clientX;
+                this.currentY = e.clientY;
+            }
+            e.preventDefault();
+        };
+
+        deathPath.game = function(gameContainer)
+        {
+            var that = this;
+            this.gameContainer = gameContainer;
+
+            document.addEventListener("keyup", function (e) { cw.pub('key.up', e); });
+            document.addEventListener("mouseup", function (e) { cw.pub('mouse.up', e); });
+            document.addEventListener("mousemove", function (e) { cw.pub('mouse.move', e); });
+            document.addEventListener("mousedown", function (e) { cw.pub('mouse.down', e); });
+            document.addEventListener("mouseout", function (e) { cw.pub('mouse.out', e); });
+
+            var board = new deathPath.board(gameContainer, 6, 6);
+            this.boardPaths = [];
+
+            this.availableTiles =
+                [
+                    new deathPath.tile(gameContainer, [[deathPath.pos.t1, deathPath.pos.b2], [deathPath.pos.t2, deathPath.pos.b1], [deathPath.pos.l1, deathPath.pos.r2], [deathPath.pos.l2, deathPath.pos.r1]], 630, 50),
+                    new deathPath.tile(gameContainer, [[deathPath.pos.t1, deathPath.pos.b1], [deathPath.pos.t2, deathPath.pos.b2], [deathPath.pos.l1, deathPath.pos.r1], [deathPath.pos.l2, deathPath.pos.r2]], 630, 200),
+                    new deathPath.tile(gameContainer, [[deathPath.pos.t1, deathPath.pos.l1], [deathPath.pos.t2, deathPath.pos.r1], [deathPath.pos.l2, deathPath.pos.b1], [deathPath.pos.r2, deathPath.pos.b2]], 630, 350),
+                    new deathPath.tile(gameContainer, [[deathPath.pos.l1, deathPath.pos.t2], [deathPath.pos.l2, deathPath.pos.t1], [deathPath.pos.b1, deathPath.pos.r1], [deathPath.pos.b2, deathPath.pos.r2]], 630, 500)
+                ];
+
+            this.createPlayer = function (name) {
+                return new deathPath.player(gameContainer, name);
+            };
+            this.createPlaceholder = function (x, y) {
+                return new deathPath.placeholder(gameContainer, x, y);
+            };
+            this.createTile = function (routes)
+            {
+                return new deathPath.tile(gameContainer, routes);
+            };
+
+            cw.sub('placeholder.filled', function (e) { that.drawBoardPaths() });
+        };
+
+        deathPath.game.prototype.drawBoardPaths = function () {
+            for (var i = 0; i < this.boardPaths.length; i++) {
+                this.gameContainer.removeChild(this.boardPaths[i].getSvg());
+            }
+            this.boardPaths = [];
+            for (var i = 0; i < this.availableTiles.length; i++) {
+                var clientPaths = this.availableTiles[i].getClientPaths();
+                for(var k = 0; k < clientPaths.length; k++)
+                {
+                    this.boardPaths.push(clientPaths[k]);
+                }
+                for (var j = 0; j < this.boardPaths.length; j++) {
+                    this.gameContainer.appendChild(this.boardPaths[j].getSvg());
+                }
+            }
+        }
+
+        deathPath.game.prototype.players = [];
+        deathPath.game.prototype.addPlayer = function (name)
+        {
+            var player = this.createPlayer(name);
+            player.getSvg();
+            this.players.push(player);
+        }
+
+        deathPath.game.prototype.run = function ()
+        {
+            for (var i = 0; i < this.availableTiles.length; i++) {
+                this.availableTiles[i].getSvg();
+            }
+        }
+
+    </script>
+</head>
+<body>
+
+<svg id="game" width="100%" height="800" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <style type="text/css"><![CDATA[
+        body{
+            background-color:#7C3519;
+        }
+    ]]></style>
+
+</svg>
+
+<script type="text/javascript">
+    var game = new deathPath.game(document.getElementById('game'));
+    game.addPlayer(cw.colors.red);
+    game.addPlayer(cw.colors.blue);
+    game.run();
+</script>
+
+</body>
+</html>
